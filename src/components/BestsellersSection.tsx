@@ -6,8 +6,9 @@ import { ArrowRight } from 'lucide-react';
 
 export const BestsellersSection: React.FC = () => {
   const { products } = useProducts();
-  // 4 Bestsellers items
-  const bestsellers = products.filter((p) => p.isBestSeller || p.badge === 'BEST SELLER').slice(0, 4);
+  // 4 Bestsellers items, fallback to newest products if no items specifically tagged
+  const bestsellersPool = products.filter((p) => p.isBestSeller || p.badge === 'BEST SELLER');
+  const bestsellers = (bestsellersPool.length > 0 ? bestsellersPool : products).slice(0, 4);
 
   return (
     <section className="py-20 lg:py-28 bg-white">

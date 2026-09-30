@@ -5,10 +5,27 @@ import { PRODUCTS } from '../data/products';
 import { firebaseConfigured, firebaseDb } from '../lib/firebase';
 import type { Product } from '../types/product';
 
+const getStoredProducts = (): Product[] => {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('hv_cached_products');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+  }
+  return firebaseConfigured ? [] : PRODUCTS;
+};
+
 export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [products, setProducts] = useState<Product[]>(PRODUCTS);
-  const [loading, setLoading] = useState(firebaseConfigured);
-  const [error, setError] = useState(firebaseConfigured ? '' : 'Firebase chưa được cấu hình. Đang hiển thị catalog mẫu.');
+  const [products, setProducts] = useState<Product[]>(getStoredProducts);
+  const [loading, setLoading] = useState(() => {
+    // If we already have cached products, don't show blank loading screen
+    if (typeof window !== 'undefined' && localStorage.getItem('hv_cached_products')) return false;
+    return firebaseConfigured;
+  });
+  const [error, setError] = useState(firebaseConfigured ? '' : 'Firebase chưa được cấu hình.');
 
   useEffect(() => {
     if (!firebaseDb) return;
@@ -29,17 +46,23 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setProducts(items);
       setError('');
       setLoading(false);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('hv_cached_products', JSON.stringify(items));
+        } catch {}
+      }
     }, (snapshotError) => {
       const message = snapshotError.message.toLowerCase();
       if (message.includes("database '(default)' not found") || message.includes('database not found')) {
-        setError('Chưa tạo Firestore Database cho dự án Firebase này. Hãy tạo Firestore Database trong Firebase Console; hiện đang dùng catalog mẫu.');
+        setError('Chưa tạo Firestore Database cho dự án Firebase này. Hãy tạo Firestore Database trong Firebase Console.');
       } else if (snapshotError.code === 'permission-denied') {
-        setError('Firestore từ chối quyền đọc. Hãy deploy firestore.rules cho đúng Firebase project; hiện đang dùng catalog mẫu.');
+        setError('Firestore từ chối quyền đọc. Hãy kiểm tra rules Firestore.');
       } else {
-        setError(`Không kết nối được Firestore: ${snapshotError.message}. Hiện đang dùng catalog mẫu.`);
+        setError(`Không kết nối được Firestore: ${snapshotError.message}`);
       }
       setLoading(false);
-      setProducts(PRODUCTS);
+      // Keep existing products or cached products, never overwrite user products with sample catalog
+      setProducts((prev) => (prev.length > 0 ? prev : (firebaseConfigured ? [] : PRODUCTS)));
     });
   }, []);
 

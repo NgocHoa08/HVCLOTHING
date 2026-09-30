@@ -16,10 +16,11 @@ export const NewArrivalsSection: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabCategory>('ALL');
   const { products } = useProducts();
 
-  // Filter new arrivals items
+  // Filter new arrivals items, fallback to all products if few items marked isNew
   const newItems = products.filter((p) => p.isNew || p.badge === 'NEW');
+  const basePool = newItems.length >= 4 ? newItems : products;
 
-  const filtered = newItems.filter((item) => {
+  const filtered = basePool.filter((item) => {
     if (activeTab === 'ALL') return true;
     if (activeTab === 'WOMEN') return item.gender === 'women' || item.gender === 'unisex';
     if (activeTab === 'MEN') return item.gender === 'men' || item.gender === 'unisex';

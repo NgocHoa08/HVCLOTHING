@@ -28,17 +28,21 @@ export const Shop: React.FC = () => {
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState(searchParam);
 
-  // Sync state with URL
+  // Sync state with URL whenever tab or route changes
   useEffect(() => {
-    if (categoryParam) setSelectedCategory(categoryParam);
-    if (subcategoryParam) setSelectedSubcategory(subcategoryParam);
-    if (searchParam) setSearchQuery(searchParam);
-  }, [categoryParam, subcategoryParam, searchParam]);
+    setSelectedCategory(categoryParam);
+    setSelectedSubcategory(subcategoryParam);
+    setSearchQuery(searchParam);
+    setSelectedSizes([]);
+    setSelectedColor('');
+    setPriceTier('all');
+    setInStockOnly(false);
+  }, [categoryParam, subcategoryParam, searchParam, filterParam]);
 
   useEffect(() => {
     document.title = 'Cửa hàng — HV CLOTHING';
     window.scrollTo(0, 0);
-  }, []);
+  }, [categoryParam, filterParam]);
 
   const allSizes = ['XS', 'S', 'M', 'L', 'XL', 'One Size'];
   const allColors = [
@@ -64,7 +68,8 @@ export const Shop: React.FC = () => {
       // Category
       if (selectedCategory && selectedCategory !== 'all') {
         if (selectedCategory === 'collections') {
-          if (!product.isFeatured && !product.isNew) return false;
+          const hasFeatured = products.some((p) => p.isFeatured || p.isNew);
+          if (hasFeatured && !product.isFeatured && !product.isNew) return false;
         } else if (product.category !== selectedCategory && product.gender !== selectedCategory) {
           return false;
         }
@@ -77,13 +82,16 @@ export const Shop: React.FC = () => {
 
       // Filter flags (new / bestseller / sale)
       if (filterParam === 'new') {
-        if (!product.isNew && product.badge !== 'NEW') return false;
+        const hasNew = products.some((p) => p.isNew || p.badge === 'NEW');
+        if (hasNew && !product.isNew && product.badge !== 'NEW') return false;
       }
       if (filterParam === 'bestseller') {
-        if (!product.isBestSeller && product.badge !== 'BEST SELLER') return false;
+        const hasBestSeller = products.some((p) => p.isBestSeller || p.badge === 'BEST SELLER');
+        if (hasBestSeller && !product.isBestSeller && product.badge !== 'BEST SELLER') return false;
       }
       if (filterParam === 'sale') {
-        if (!product.salePrice && product.badge !== 'SALE') return false;
+        const hasSale = products.some((p) => (p.salePrice !== undefined && p.salePrice > 0) || p.badge === 'SALE');
+        if (hasSale && !(product.salePrice !== undefined && product.salePrice > 0) && product.badge !== 'SALE') return false;
       }
 
       // Sizes
