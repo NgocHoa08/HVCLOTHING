@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, type Timestamp } from 'firebase/firestore';
-import { Check, Copy, Database, ExternalLink, ImagePlus, LogOut, Mail, PackagePlus, Pencil, RefreshCw, Search, Shield, ShieldCheck, ShoppingBag, Trash2, Users, UserX, X } from 'lucide-react';
+import { collection, doc, onSnapshot, orderBy, query, updateDoc, type Timestamp } from 'firebase/firestore';
+import { Check, Copy, Database, ExternalLink, ImagePlus, LogOut, Mail, PackagePlus, Pencil, RefreshCw, Search, ShoppingBag, Trash2, Users, X } from 'lucide-react';
 import { useAuth } from '../context/useAuth';
 import { useProducts } from '../context/useProducts';
 import { formatPrice, PRODUCTS } from '../data/products';
@@ -180,11 +180,7 @@ export const Admin: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [registeredUsers, setRegisteredUsers] = useState<RegisteredUser[]>([]);
-  const [adminsMap, setAdminsMap] = useState<Record<string, { email?: string; grantedBy?: string }>>({});
   const [usersLoading, setUsersLoading] = useState(Boolean(firebaseDb));
-  const [targetAdminUid, setTargetAdminUid] = useState('');
-  const [targetAdminEmail, setTargetAdminEmail] = useState('');
-  const [adminActionLoading, setAdminActionLoading] = useState(false);
   const [copiedUid, setCopiedUid] = useState<string | null>(null);
   const [syncingOrders, setSyncingOrders] = useState(false);
 
@@ -247,23 +243,10 @@ export const Admin: React.FC = () => {
       },
     );
 
-    const unsubscribeAdmins = onSnapshot(
-      collection(firebaseDb, 'admins'),
-      (snapshot) => {
-        const map: Record<string, { email?: string; grantedBy?: string }> = {};
-        snapshot.docs.forEach((docItem) => {
-          map[docItem.id] = docItem.data() as { email?: string; grantedBy?: string };
-        });
-        setAdminsMap(map);
-      },
-      () => {},
-    );
-
     return () => {
       unsubscribeOrders();
       unsubscribeSubscribers();
       unsubscribeUsers();
-      unsubscribeAdmins();
     };
   }, []);
 
@@ -463,45 +446,6 @@ export const Admin: React.FC = () => {
     }
   };
 
-  const handleGrantAdmin = async (uidToGrant: string, emailToGrant?: string) => {
-    if (!firebaseDb || !uidToGrant.trim()) return;
-    setManagementError('');
-    setAdminActionLoading(true);
-    try {
-      await setDoc(doc(firebaseDb, 'admins', uidToGrant.trim()), {
-        email: emailToGrant?.trim() || '',
-        grantedBy: user?.email || user?.id || 'admin',
-        createdAt: serverTimestamp(),
-      });
-      await setDoc(doc(firebaseDb, 'users', uidToGrant.trim()), { role: 'admin' }, { merge: true }).catch(() => undefined);
-      setTargetAdminUid('');
-      setTargetAdminEmail('');
-    } catch (err) {
-      setManagementError(err instanceof Error ? err.message : 'Không thể cấp quyền admin.');
-    } finally {
-      setAdminActionLoading(false);
-    }
-  };
-
-  const handleRevokeAdmin = async (uidToRevoke: string) => {
-    if (!firebaseDb) return;
-    if (uidToRevoke === user?.id) {
-      alert('Bạn không thể tự gỡ quyền admin của chính mình.');
-      return;
-    }
-    if (!window.confirm(`Xác nhận thu hồi quyền Quản trị viên của UID: ${uidToRevoke}?`)) return;
-    setManagementError('');
-    setAdminActionLoading(true);
-    try {
-      await deleteDoc(doc(firebaseDb, 'admins', uidToRevoke));
-      await setDoc(doc(firebaseDb, 'users', uidToRevoke), { role: 'customer' }, { merge: true }).catch(() => undefined);
-    } catch (err) {
-      setManagementError(err instanceof Error ? err.message : 'Không thể gỡ quyền admin.');
-    } finally {
-      setAdminActionLoading(false);
-    }
-  };
-
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedUid(text);
@@ -533,7 +477,7 @@ export const Admin: React.FC = () => {
           <div>
             <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-[#6E7771]">HV CLOTHING / QUẢN TRỊ</p>
             <h1 className="font-serif text-3xl text-[#202722]">
-              {activeTab === 'products' ? 'Sản phẩm' : activeTab === 'orders' ? 'Đơn hàng' : activeTab === 'subscribers' ? 'Email đăng ký' : 'Tài khoản & Admin'}
+              {activeTab === 'products' ? 'Sản phẩm' : activeTab === 'orders' ? 'Đơn hàng' : activeTab === 'subscribers' ? 'Email đăng ký' : 'Khách hàng'}
             </h1>
             <p className="mt-1 text-xs text-[#737873]">{user?.email}</p>
           </div>
@@ -568,7 +512,7 @@ export const Admin: React.FC = () => {
             ['products', 'Sản phẩm', PackagePlus],
             ['orders', `Đơn hàng${orders.length ? ` (${orders.length})` : ''}`, ShoppingBag],
             ['subscribers', `Email đăng ký${subscribers.length ? ` (${subscribers.length})` : ''}`, Mail],
-            ['users', `Tài khoản & Admin${registeredUsers.length ? ` (${registeredUsers.length})` : ''}`, Users],
+            ['users', `Khách hàng${registeredUsers.length ? ` (${registeredUsers.length})` : ''}`, Users],
           ] as const).map(([tab, label, Icon]) => (
             <button key={tab} type="button" onClick={() => { setActiveTab(tab); setEditorOpen(false); }}
               aria-current={activeTab === tab ? 'page' : undefined}
@@ -886,10 +830,10 @@ export const Admin: React.FC = () => {
           <section className="space-y-6">
             {/* Quick guide card */}
             <div className="border border-[#E2E0DB] bg-white p-5">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ECEBE6] pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-semibold uppercase tracking-wider text-[#263C36]">Quản lý Tài khoản &amp; Phân quyền Admin</h3>
-                  <p className="mt-1 text-xs text-[#666]">Mọi người dùng khi tạo tài khoản đều được lưu tại Firebase Authentication. Quyền Admin được xác định qua danh sách UID trong collection <code className="bg-[#F0F1EC] px-1.5 py-0.5 font-mono text-[11px]">admins/&#123;uid&#125;</code>.</p>
+                  <h3 className="text-sm font-semibold uppercase tracking-wider text-[#263C36]">Danh sách Tài khoản Khách hàng</h3>
+                  <p className="mt-1 text-xs text-[#666]">Mọi người dùng khi đăng ký tài khoản được lưu trữ an toàn tại Firebase Authentication. Phân quyền quản trị được bảo mật trực tiếp trên Firebase Console.</p>
                 </div>
                 <a
                   href="https://console.firebase.google.com/project/hv-clothings/authentication/users"
@@ -900,40 +844,6 @@ export const Admin: React.FC = () => {
                   Mở Firebase Auth Console <ExternalLink size={13} />
                 </a>
               </div>
-
-              {/* Form to grant admin rights */}
-              <form onSubmit={(e) => { e.preventDefault(); void handleGrantAdmin(targetAdminUid, targetAdminEmail); }} className="mt-4 grid gap-3 sm:grid-cols-[1.5fr_1.5fr_auto] items-end">
-                <div>
-                  <label htmlFor="grant-uid" className="mb-1 block text-[11px] text-[#555]">User UID (Mã định danh người dùng)</label>
-                  <input
-                    id="grant-uid"
-                    required
-                    placeholder="VD: dJ3k92La1..."
-                    value={targetAdminUid}
-                    onChange={(e) => setTargetAdminUid(e.target.value)}
-                    className="admin-input font-mono"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="grant-email" className="mb-1 block text-[11px] text-[#555]">Email người dùng (tùy chọn để ghi nhớ)</label>
-                  <input
-                    id="grant-email"
-                    type="email"
-                    placeholder="email@example.com"
-                    value={targetAdminEmail}
-                    onChange={(e) => setTargetAdminEmail(e.target.value)}
-                    className="admin-input"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={adminActionLoading || !targetAdminUid.trim()}
-                  className="inline-flex min-h-[38px] items-center justify-center gap-1.5 bg-[#263C36] px-4 text-xs font-medium tracking-wider text-white hover:bg-[#192A25] disabled:opacity-60"
-                >
-                  <ShieldCheck size={14} />
-                  CẤP QUYỀN ADMIN
-                </button>
-              </form>
             </div>
 
             {/* List of Registered Users */}
@@ -943,19 +853,18 @@ export const Admin: React.FC = () => {
                   Danh sách thành viên đăng ký qua Website ({registeredUsers.length})
                 </h4>
               </div>
-              <table className="w-full min-w-[760px] border-collapse text-left">
+              <table className="w-full min-w-[700px] border-collapse text-left">
                 <thead className="bg-[#ECEDE8] text-[10px] uppercase tracking-[0.12em] text-[#606861]">
                   <tr>
                     <th className="px-4 py-3 font-medium">Người dùng</th>
                     <th className="px-4 py-3 font-medium">User UID</th>
                     <th className="px-4 py-3 font-medium">Vai trò</th>
                     <th className="px-4 py-3 font-medium">Ngày đăng ký</th>
-                    <th className="px-4 py-3 text-right font-medium">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#ECEDE8]">
                   {registeredUsers.map((regUser) => {
-                    const isAccountAdmin = Boolean(adminsMap[regUser.uid]) || regUser.role === 'admin';
+                    const isAccountAdmin = regUser.role === 'admin';
                     const isSelf = regUser.uid === user?.id;
                     return (
                       <tr key={regUser.uid} className="text-xs text-[#343A35]">
@@ -965,7 +874,7 @@ export const Admin: React.FC = () => {
                         </td>
                         <td className="px-4 py-3 font-mono text-[11px] text-[#555]">
                           <div className="flex items-center gap-1.5">
-                            <span className="truncate max-w-[150px]">{regUser.uid}</span>
+                            <span className="truncate max-w-[180px]">{regUser.uid}</span>
                             <button
                               type="button"
                               onClick={() => copyToClipboard(regUser.uid)}
@@ -977,39 +886,19 @@ export const Admin: React.FC = () => {
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <span
-                            className={`inline-block px-2 py-0.5 text-[10px] font-medium uppercase rounded ${
-                              isAccountAdmin ? 'bg-[#263C36] text-white' : 'bg-[#EAEAEA] text-[#555]'
-                            }`}
-                          >
-                            {isAccountAdmin ? 'Quản trị viên' : 'Khách hàng'}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`inline-block px-2.5 py-0.5 text-[10px] font-medium uppercase rounded ${
+                                isAccountAdmin ? 'bg-[#263C36] text-white' : 'bg-[#EAEAEA] text-[#555]'
+                              }`}
+                            >
+                              {isAccountAdmin ? 'Quản trị viên' : 'Thành viên'}
+                            </span>
+                            {isSelf && <span className="text-[10px] text-[#888] italic">(Tài khoản hiện tại)</span>}
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-[11px] text-[#777]">
                           {formatDate(regUser.createdAt)}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {isSelf ? (
-                            <span className="text-[11px] text-[#888] italic">Đang đăng nhập</span>
-                          ) : isAccountAdmin ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleRevokeAdmin(regUser.uid)}
-                              disabled={adminActionLoading}
-                              className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-700 hover:underline"
-                            >
-                              <UserX size={13} /> Gỡ quyền Admin
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => void handleGrantAdmin(regUser.uid, regUser.email)}
-                              disabled={adminActionLoading}
-                              className="inline-flex items-center gap-1 text-[11px] font-medium text-[#263C36] hover:underline"
-                            >
-                              <Shield size={13} /> Thăng cấp Admin
-                            </button>
-                          )}
                         </td>
                       </tr>
                     );
@@ -1020,65 +909,7 @@ export const Admin: React.FC = () => {
               {!usersLoading && registeredUsers.length === 0 && (
                 <div className="px-4 py-10 text-center text-xs text-[#777]">
                   <p>Chưa có tài khoản nào được ghi nhận từ website.</p>
-                  <p className="mt-1 text-[11px] text-[#999]">Bạn có thể nhập UID trực tiếp ở khung bên trên hoặc mở Firebase Auth Console để copy UID tài khoản muốn cấp quyền.</p>
                 </div>
-              )}
-            </div>
-
-            {/* List of all Active Admins in Firestore */}
-            <div className="overflow-x-auto border border-[#DADAD4] bg-white">
-              <div className="border-b border-[#ECEBE6] px-4 py-3 bg-[#FAFAF8] flex items-center justify-between">
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-[#404842]">
-                  Danh sách Quản trị viên hiện tại ({Object.keys(adminsMap).length})
-                </h4>
-              </div>
-              <table className="w-full min-w-[600px] border-collapse text-left">
-                <thead className="bg-[#ECEDE8] text-[10px] uppercase tracking-[0.12em] text-[#606861]">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">Admin UID</th>
-                    <th className="px-4 py-3 font-medium">Email / Ghi chú</th>
-                    <th className="px-4 py-3 font-medium">Người cấp</th>
-                    <th className="px-4 py-3 text-right font-medium">Thao tác</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#ECEDE8]">
-                  {Object.entries(adminsMap).map(([adminUid, adminData]) => (
-                    <tr key={adminUid} className="text-xs text-[#343A35]">
-                      <td className="px-4 py-3 font-mono text-[11px]">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-semibold text-[#263C36]">{adminUid}</span>
-                          <button
-                            type="button"
-                            onClick={() => copyToClipboard(adminUid)}
-                            className="text-[#777] hover:text-black"
-                            title="Sao chép UID"
-                          >
-                            {copiedUid === adminUid ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
-                          </button>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-[#555]">{adminData.email || 'Chưa ghi chú'}</td>
-                      <td className="px-4 py-3 text-[#777]">{adminData.grantedBy || 'Hệ thống'}</td>
-                      <td className="px-4 py-3 text-right">
-                        {adminUid === user?.id ? (
-                          <span className="text-[11px] text-[#888] italic">Tài khoản của bạn</span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => void handleRevokeAdmin(adminUid)}
-                            disabled={adminActionLoading}
-                            className="text-[11px] font-medium text-rose-700 hover:underline"
-                          >
-                            Gỡ quyền Admin
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {Object.keys(adminsMap).length === 0 && (
-                <p className="px-4 py-8 text-center text-xs text-[#777]">Chưa có dữ liệu admin trong collection admins. Hãy thêm admin đầu tiên bằng ô phía trên.</p>
               )}
             </div>
           </section>
