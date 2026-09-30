@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/useAuth';
 import { formatPrice } from '../data/products';
 import { CheckCircle2, ShieldCheck, CreditCard, Banknote, QrCode, ArrowLeft, Truck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -8,6 +9,7 @@ import { saveOrder } from '../lib/customer-submissions';
 
 export const Checkout: React.FC = () => {
   const { cart, subtotal, discount, couponCode, shippingFee, total, clearCart } = useCart();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   // Form states
@@ -25,6 +27,14 @@ export const Checkout: React.FC = () => {
   // Confirmation modal
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [orderCode, setOrderCode] = useState('');
+
+  // Pre-fill user data if logged in
+  useEffect(() => {
+    if (user) {
+      if (user.email && !email) setEmail(user.email);
+      if (user.name && !fullName) setFullName(user.name);
+    }
+  }, [user]);
 
   useEffect(() => {
     document.title = 'Thanh toán — HV CLOTHING';
@@ -49,6 +59,14 @@ export const Checkout: React.FC = () => {
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (cart.length === 0) {
+      setOrderError('Túi đồ đang trống. Vui lòng chọn sản phẩm.');
+      return;
+    }
+    if (!phone.trim()) {
+      setOrderError('Vui lòng nhập số điện thoại nhận hàng.');
+      return;
+    }
     setIsSubmittingOrder(true);
     setOrderError('');
     try {
@@ -69,6 +87,7 @@ export const Checkout: React.FC = () => {
         total,
       });
       setOrderCode(savedOrder.orderCode);
+      clearCart();
       setIsSuccessModalOpen(true);
     } catch (submitError) {
       setOrderError(submitError instanceof Error ? submitError.message : 'Không thể lưu đơn hàng. Vui lòng thử lại.');
@@ -78,7 +97,6 @@ export const Checkout: React.FC = () => {
   };
 
   const handleFinish = () => {
-    clearCart();
     setIsSuccessModalOpen(false);
     navigate('/');
   };
@@ -178,6 +196,12 @@ export const Checkout: React.FC = () => {
                       <option value="Đà Nẵng">Đà Nẵng</option>
                       <option value="Hải Phòng">Hải Phòng</option>
                       <option value="Cần Thơ">Cần Thơ</option>
+                      <option value="Bình Dương">Bình Dương</option>
+                      <option value="Đồng Nai">Đồng Nai</option>
+                      <option value="Quảng Ninh">Quảng Ninh</option>
+                      <option value="Khánh Hòa">Khánh Hòa</option>
+                      <option value="Thừa Thiên Huế">Thừa Thiên Huế</option>
+                      <option value="Tỉnh thành khác">Tỉnh thành khác</option>
                     </select>
                   </div>
 

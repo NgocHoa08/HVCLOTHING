@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, type Timestamp } from 'firebase/firestore';
-import { Check, Copy, Database, ExternalLink, ImagePlus, LogOut, Mail, PackagePlus, Pencil, Search, Shield, ShieldCheck, ShoppingBag, Trash2, Users, UserX, X } from 'lucide-react';
+import { Check, Copy, Database, ExternalLink, ImagePlus, LogOut, Mail, PackagePlus, Pencil, RefreshCw, Search, Shield, ShieldCheck, ShoppingBag, Trash2, Users, UserX, X } from 'lucide-react';
 import { useAuth } from '../context/useAuth';
 import { useProducts } from '../context/useProducts';
 import { formatPrice, PRODUCTS } from '../data/products';
 import { firebaseDb } from '../lib/firebase';
 import { deleteUploadedProductImages, uploadProductImages } from '../lib/product-images';
+import { getLocalOrders, saveLocalOrder, syncLocalOrdersToFirestore } from '../lib/customer-submissions';
 import type { Product, ProductCategory } from '../types/product';
 
 type AdminTab = 'products' | 'orders' | 'subscribers' | 'users';
@@ -33,7 +34,8 @@ interface AdminOrder {
   total: number;
   paymentMethod: 'cod' | 'bank' | 'card';
   status: 'new' | 'confirmed' | 'packing' | 'shipped' | 'completed' | 'cancelled';
-  createdAt?: Timestamp;
+  createdAt?: any;
+  syncedToCloud?: boolean;
 }
 
 interface NewsletterSubscriber {
@@ -52,9 +54,19 @@ const paymentMethodLabels: Record<AdminOrder['paymentMethod'], string> = {
   cod: 'COD', bank: 'Chuyển khoản', card: 'Thẻ quốc tế',
 };
 
-const formatDate = (timestamp?: Timestamp) => timestamp
-  ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(timestamp.toDate())
-  : 'Đang cập nhật';
+const formatDate = (timestamp?: any) => {
+  if (!timestamp) return 'Đang cập nhật';
+  try {
+    if (typeof timestamp.toDate === 'function') {
+      return new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(timestamp.toDate());
+    }
+    const d = new Date(timestamp);
+    if (!isNaN(d.getTime())) {
+      return new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(d);
+    }
+  } catch {}
+  return 'Đang cập nhật';
+};
 
 interface ProductForm {
   name: string;
@@ -174,18 +186,36 @@ export const Admin: React.FC = () => {
   const [targetAdminEmail, setTargetAdminEmail] = useState('');
   const [adminActionLoading, setAdminActionLoading] = useState(false);
   const [copiedUid, setCopiedUid] = useState<string | null>(null);
+  const [syncingOrders, setSyncingOrders] = useState(false);
 
   useEffect(() => {
-    if (!firebaseDb) return;
+    const mergeWithLocalOrders = (cloudOrders: AdminOrder[]) => {
+      const local = getLocalOrders() as AdminOrder[];
+      const combined = [...cloudOrders];
+      for (const loc of local) {
+        if (!combined.some((c) => c.orderCode === loc.orderCode)) {
+          combined.push(loc);
+        }
+      }
+      setOrders(combined);
+    };
+
+    if (!firebaseDb) {
+      setOrders(getLocalOrders() as AdminOrder[]);
+      setOrdersLoading(false);
+      return;
+    }
 
     const unsubscribeOrders = onSnapshot(
       query(collection(firebaseDb, 'orders'), orderBy('createdAt', 'desc')),
       (snapshot) => {
-        setOrders(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as AdminOrder));
+        const cloud = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as AdminOrder);
+        mergeWithLocalOrders(cloud);
         setOrdersLoading(false);
       },
       (snapshotError) => {
-        setManagementError(`Không tải được đơn hàng: ${snapshotError.message}`);
+        setManagementError(`Chưa kết nối dữ liệu đám mây (${snapshotError.message}). Đang hiển thị đơn hàng lưu tại bộ nhớ máy.`);
+        setOrders(getLocalOrders() as AdminOrder[]);
         setOrdersLoading(false);
       },
     );
@@ -391,12 +421,45 @@ export const Admin: React.FC = () => {
   };
 
   const handleOrderStatusChange = async (orderId: string, status: AdminOrder['status']) => {
-    if (!firebaseDb) return;
+    setManagementError('');
+    // Cập nhật trạng thái ngay lập tức trên giao diện
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status } : o)));
+
+    // Cập nhật bản sao trong bộ nhớ máy
+    const localList = getLocalOrders();
+    const targetLocal = localList.find((o) => o.id === orderId || o.orderCode === orderId);
+    if (targetLocal) {
+      targetLocal.status = status;
+      saveLocalOrder(targetLocal);
+    }
+
+    // Cập nhật Firestore nếu là đơn đã lưu Cloud
+    if (firebaseDb && !orderId.startsWith('local_')) {
+      try {
+        await updateDoc(doc(firebaseDb, 'orders', orderId), { status });
+      } catch (statusError) {
+        setManagementError(statusError instanceof Error ? statusError.message : 'Không cập nhật được trạng thái đơn trên Firestore.');
+      }
+    }
+  };
+
+  const handleSyncOrders = async () => {
+    setSyncingOrders(true);
     setManagementError('');
     try {
-      await updateDoc(doc(firebaseDb, 'orders', orderId), { status });
-    } catch (statusError) {
-      setManagementError(statusError instanceof Error ? statusError.message : 'Không cập nhật được trạng thái đơn hàng.');
+      const result = await syncLocalOrdersToFirestore();
+      if (result.errors.length > 0) {
+        setManagementError(`Đã đồng bộ ${result.syncedCount} đơn. Một số đơn lỗi: ${result.errors.join('; ')}`);
+      } else {
+        alert(`Đã đồng bộ thành công ${result.syncedCount} đơn hàng lên Cloud Firestore!`);
+      }
+      // Nạp lại danh sách đơn hàng
+      const local = getLocalOrders() as AdminOrder[];
+      setOrders(local);
+    } catch (syncErr: any) {
+      setManagementError(syncErr?.message || 'Lỗi khi đồng bộ đơn hàng lên Cloud');
+    } finally {
+      setSyncingOrders(false);
     }
   };
 
@@ -719,7 +782,31 @@ export const Admin: React.FC = () => {
         </div>}
 
         {activeTab === 'orders' && (
-          <section className="overflow-x-auto border border-[#DADAD4] bg-white">
+          <section className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 border border-[#DADAD4]">
+              <div>
+                <h2 className="text-sm font-medium text-[#111]">
+                  Danh sách đơn hàng ({orders.length})
+                </h2>
+                <p className="text-xs text-[#777] mt-0.5">
+                  Tự động đồng bộ giữa Cloud Firestore và bộ nhớ thiết bị.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSyncOrders}
+                  disabled={syncingOrders}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#263C36] text-white text-xs font-medium hover:bg-[#192A25] transition-colors disabled:opacity-60"
+                  title="Đồng bộ các đơn hàng lưu tại máy lên Firestore"
+                >
+                  <RefreshCw size={13} className={syncingOrders ? 'animate-spin' : ''} />
+                  <span>{syncingOrders ? 'Đang đồng bộ...' : 'Đồng bộ lên Cloud'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto border border-[#DADAD4] bg-white">
             <table className="w-full min-w-[900px] border-collapse text-left">
               <thead className="bg-[#ECEDE8] text-[10px] uppercase tracking-[0.12em] text-[#606861]">
                 <tr>
@@ -735,7 +822,21 @@ export const Admin: React.FC = () => {
                 {orders.map((order) => (
                   <React.Fragment key={order.id}>
                     <tr className="text-xs text-[#343A35]">
-                      <td className="px-4 py-3"><p className="font-mono font-medium">{order.orderCode}</p><p className="mt-1 text-[10px] text-[#838983]">{formatDate(order.createdAt)}</p></td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-medium">{order.orderCode}</span>
+                          {order.syncedToCloud === false || order.id.startsWith('local_') ? (
+                            <span className="px-1.5 py-0.2 text-[9px] bg-amber-100 text-amber-800 rounded font-medium" title="Đang lưu tại máy, chờ đồng bộ Cloud">
+                              Máy
+                            </span>
+                          ) : (
+                            <span className="px-1.5 py-0.2 text-[9px] bg-emerald-100 text-emerald-800 rounded font-medium" title="Đã lưu trên Cloud Firestore">
+                              Cloud
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-[10px] text-[#838983]">{formatDate(order.createdAt)}</p>
+                      </td>
                       <td className="px-4 py-3"><p className="font-medium">{order.customer?.fullName}</p><p className="mt-1">{order.customer?.email}</p><p className="mt-1 text-[#777]">{order.customer?.phone}</p></td>
                       <td className="px-4 py-3">{order.items?.length ?? 0} mặt hàng
                         <button type="button" onClick={() => setExpandedOrderId((current) => current === order.id ? null : order.id)} className="ml-2 text-[#37634B] underline underline-offset-2">
@@ -766,6 +867,7 @@ export const Admin: React.FC = () => {
             </table>
             {ordersLoading && <p className="px-4 py-4 text-xs text-[#777]">Đang tải đơn hàng...</p>}
             {!ordersLoading && orders.length === 0 && <p className="px-4 py-12 text-center text-xs text-[#777]">Chưa có đơn hàng nào.</p>}
+            </div>
           </section>
         )}
 
