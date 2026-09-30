@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Search, User, Heart, ShoppingBag, Menu, ChevronDown, LogOut, Shield } from 'lucide-react';
 import { useAuth } from '../context/useAuth';
@@ -11,6 +11,8 @@ export const Header: React.FC = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isShopMegaOpen, setIsShopMegaOpen] = useState(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
   const { user, logout } = useAuth();
   const { cartCount, wishlist, setIsSearchOpen, setIsCartDrawerOpen, addToast } = useCart();
   const location = useLocation();
@@ -31,7 +33,19 @@ export const Header: React.FC = () => {
   useEffect(() => {
     setIsMobileMenuOpen(false);
     setIsShopMegaOpen(false);
+    setIsAccountMenuOpen(false);
   }, [location.pathname, location.search]);
+
+  // Click outside to close account dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) {
+        setIsAccountMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <>
@@ -149,60 +163,78 @@ export const Header: React.FC = () => {
 
               {/* Account Dropdown / Link */}
               {user ? (
-                <div className="relative group">
+                <div
+                  ref={accountMenuRef}
+                  className="relative"
+                  onMouseEnter={() => setIsAccountMenuOpen(true)}
+                  onMouseLeave={() => setIsAccountMenuOpen(false)}
+                >
                   <button
                     type="button"
-                    className="flex items-center gap-1.5 text-[#111111] hover:opacity-80 transition-opacity p-1"
+                    onClick={() => setIsAccountMenuOpen((prev) => !prev)}
+                    className="flex items-center gap-1.5 text-[#111111] hover:opacity-80 transition-opacity p-1 cursor-pointer"
                     aria-label="Menu tài khoản"
+                    aria-expanded={isAccountMenuOpen}
                   >
                     <User className="w-[18px] h-[18px] stroke-[1.4]" />
                     <span className="hidden xl:inline max-w-[110px] truncate text-[11px] font-medium tracking-wide">
                       {user.name || user.email.split('@')[0]}
                     </span>
-                    <ChevronDown className="w-3 h-3 text-[#777] -ml-0.5" />
+                    <ChevronDown className={`w-3 h-3 text-[#777] -ml-0.5 transition-transform duration-200 ${isAccountMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
 
-                  {/* Dropdown Menu */}
-                  <div className="absolute right-0 top-full mt-1.5 w-60 bg-white border border-[#E2E0DB] shadow-lg py-1.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 z-50">
-                    <div className="px-4 py-2 border-b border-[#F0F0EE]">
-                      <p className="text-[10px] text-[#777] uppercase tracking-wider">Tài khoản</p>
-                      <p className="text-xs font-semibold text-[#111] truncate">{user.name || user.email}</p>
-                      <span className={`inline-block mt-1 px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider ${
-                        user.role === 'admin' ? 'bg-[#263C36] text-white' : 'bg-[#EAEAEA] text-[#555]'
-                      }`}>
-                        {user.role === 'admin' ? 'Quản trị viên' : 'Khách hàng'}
-                      </span>
-                    </div>
+                  {/* Dropdown Menu with seamless invisible hover bridge */}
+                  <div
+                    className={`absolute right-0 top-full pt-1.5 w-64 z-50 transition-all duration-200 ${
+                      isAccountMenuOpen
+                        ? 'opacity-100 pointer-events-auto translate-y-0'
+                        : 'opacity-0 pointer-events-none -translate-y-1'
+                    }`}
+                  >
+                    <div className="bg-white border border-[#E2E0DB] shadow-xl py-1.5 rounded-none">
+                      <div className="px-4 py-2.5 border-b border-[#F0F0EE]">
+                        <p className="text-[10px] text-[#777] uppercase tracking-wider">Tài khoản</p>
+                        <p className="text-xs font-semibold text-[#111] truncate">{user.name || user.email}</p>
+                        <span className={`inline-block mt-1 px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider ${
+                          user.role === 'admin' ? 'bg-[#263C36] text-white' : 'bg-[#EAEAEA] text-[#555]'
+                        }`}>
+                          {user.role === 'admin' ? 'Quản trị viên' : 'Khách hàng'}
+                        </span>
+                      </div>
 
-                    {user.role === 'admin' && (
+                      {user.role === 'admin' && (
+                        <Link
+                          to="/admin"
+                          onClick={() => setIsAccountMenuOpen(false)}
+                          className="flex items-center gap-2 px-4 py-2.5 text-xs text-[#263C36] font-medium hover:bg-[#F7F7F5] transition-colors"
+                        >
+                          <Shield className="w-3.5 h-3.5" />
+                          <span>Trang quản trị (Admin)</span>
+                        </Link>
+                      )}
+
                       <Link
-                        to="/admin"
-                        className="flex items-center gap-2 px-4 py-2.5 text-xs text-[#263C36] font-medium hover:bg-[#F7F7F5] transition-colors"
+                        to="/account"
+                        onClick={() => setIsAccountMenuOpen(false)}
+                        className="flex items-center gap-2 px-4 py-2 text-xs text-[#333] hover:bg-[#F7F7F5] transition-colors"
                       >
-                        <Shield className="w-3.5 h-3.5" />
-                        <span>Trang quản trị (Admin)</span>
+                        <User className="w-3.5 h-3.5 text-[#777]" />
+                        <span>Thông tin tài khoản</span>
                       </Link>
-                    )}
 
-                    <Link
-                      to="/account"
-                      className="flex items-center gap-2 px-4 py-2 text-xs text-[#333] hover:bg-[#F7F7F5] transition-colors"
-                    >
-                      <User className="w-3.5 h-3.5 text-[#777]" />
-                      <span>Thông tin tài khoản</span>
-                    </Link>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void logout();
-                        addToast('Đã đăng xuất tài khoản thành công', 'info');
-                      }}
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-[#A43131] hover:bg-rose-50 transition-colors border-t border-[#F0F0EE] mt-1"
-                    >
-                      <LogOut className="w-3.5 h-3.5" />
-                      <span>Đăng xuất</span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAccountMenuOpen(false);
+                          void logout();
+                          addToast('Đã đăng xuất tài khoản thành công', 'info');
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-[#A43131] hover:bg-rose-50 transition-colors border-t border-[#F0F0EE] mt-1 cursor-pointer font-medium"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Đăng xuất</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : (
