@@ -104,6 +104,11 @@ export const Footer: React.FC = () => {
               }`}
             >
               <li>
+                <Link to="/account?tab=tracking" className="text-emerald-400 hover:text-white transition-colors font-medium">
+                  Tra cứu đơn hàng
+                </Link>
+              </li>
+              <li>
                 <Link to="/contact" className="hover:text-white transition-colors">
                   Liên hệ
                 </Link>

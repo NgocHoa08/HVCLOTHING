@@ -17,11 +17,15 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Đơn hàng: Bất kỳ khách nào cũng được đặt hàng (create: true)
-    // Chỉ Quản trị viên mới được đọc, cập nhật trạng thái hoặc xóa đơn
+    // Đơn hàng:
+    // - Cho phép khách gửi đơn hàng (create)
+    // - Cho phép người dùng đọc đơn hàng của chính mình (theo userId) hoặc tra cứu mã đơn
+    // - Quản trị viên có toàn quyền đọc, duyệt trạng thái và xóa đơn
     match /orders/{orderId} {
       allow create: if true;
-      allow read, update, delete: if isAdmin();
+      allow get: if true;
+      allow list: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow update, delete: if isAdmin();
     }
 
     // Đăng ký nhận tin tức / khuyến mãi

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/useAuth';
 import { formatPrice } from '../data/products';
-import { CheckCircle2, ShieldCheck, CreditCard, Banknote, QrCode, ArrowLeft, Truck } from 'lucide-react';
+import { CheckCircle2, ShieldCheck, CreditCard, Banknote, QrCode, ArrowLeft, Truck, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { saveOrder } from '../lib/customer-submissions';
 
@@ -483,12 +483,23 @@ export const Checkout: React.FC = () => {
                 </div>
               </div>
 
-              <button
-                onClick={handleFinish}
-                className="btn-luxury w-full text-xs"
-              >
-                QUAY VỀ TRANG CHỦ
-              </button>
+              <div className="space-y-2.5">
+                <Link
+                  to={`/account?tab=tracking&code=${orderCode}`}
+                  onClick={() => setIsSuccessModalOpen(false)}
+                  className="btn-luxury w-full text-xs flex items-center justify-center gap-2"
+                >
+                  <Package className="w-4 h-4" />
+                  <span>THEO DÕI TRẠNG THÁI ĐƠN HÀNG</span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleFinish}
+                  className="w-full py-2.5 border border-[#D5D5CF] bg-white text-xs font-medium text-[#444] hover:bg-[#F7F7F5] transition-colors"
+                >
+                  QUAY VỀ TRANG CHỦ
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

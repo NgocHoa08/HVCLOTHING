@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
-import { Search, User, Heart, ShoppingBag, Menu, ChevronDown, LogOut, Shield } from 'lucide-react';
+import { Search, User, Heart, ShoppingBag, Menu, ChevronDown, LogOut, Shield, Package } from 'lucide-react';
 import { useAuth } from '../context/useAuth';
 import { useCart } from '../context/CartContext';
 import { MobileMenu } from './MobileMenu';
@@ -214,9 +214,18 @@ export const Header: React.FC = () => {
                       )}
 
                       <Link
-                        to="/account"
+                        to="/account?tab=orders"
                         onClick={() => setIsAccountMenuOpen(false)}
-                        className="flex items-center gap-2 px-4 py-2 text-xs text-[#333] hover:bg-[#F7F7F5] transition-colors"
+                        className="flex items-center gap-2 px-4 py-2.5 text-xs text-[#111] hover:bg-[#F7F7F5] transition-colors font-medium border-b border-[#F0F0EE]"
+                      >
+                        <Package className="w-3.5 h-3.5 text-[#263C36]" />
+                        <span>Đơn hàng & Trạng thái</span>
+                      </Link>
+
+                      <Link
+                        to="/account?tab=profile"
+                        onClick={() => setIsAccountMenuOpen(false)}
+                        className="flex items-center gap-2 px-4 py-2 text-xs text-[#444] hover:bg-[#F7F7F5] transition-colors"
                       >
                         <User className="w-3.5 h-3.5 text-[#777]" />
                         <span>Thông tin tài khoản</span>
