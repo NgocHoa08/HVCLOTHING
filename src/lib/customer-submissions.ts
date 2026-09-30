@@ -73,7 +73,17 @@ export const getLocalOrders = (): StoredOrder[] => {
     const raw = localStorage.getItem(LOCAL_ORDERS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    // Tự động làm sạch các chuỗi Base64 ảnh cũ nếu có trong local storage
+    return parsed.map((order) => {
+      if (Array.isArray(order.items)) {
+        order.items = order.items.map((it: any) => ({
+          ...it,
+          image: typeof it.image === 'string' && (it.image.startsWith('data:image') || it.image.length > 500) ? '' : (it.image || ''),
+        }));
+      }
+      return order;
+    });
   } catch {
     return [];
   }
@@ -98,7 +108,7 @@ export const saveOrder = async (input: PlaceOrderInput): Promise<{ id: string; o
   const orderCode = generateOrderCode();
   const localId = `local_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-  // Chuẩn hóa dữ liệu sản phẩm, tuyệt đối không để giá trị undefined
+  // Chuẩn hóa dữ liệu sản phẩm, tuyệt đối không lưu chuỗi Base64 ảnh nặng vào document đơn hàng
   const items = (input.items || []).map((item) => {
     const unitPrice = Number(item.product?.salePrice ?? item.product?.price) || 0;
     const quantity = Number(item.quantity) || 1;
@@ -108,16 +118,21 @@ export const saveOrder = async (input: PlaceOrderInput): Promise<{ id: string; o
         : typeof item.selectedColor === 'string'
         ? item.selectedColor
         : 'Mặc định';
-    const image =
-      Array.isArray(item.product?.images) && item.product.images.length > 0
-        ? item.product.images[0]
-        : '';
+
+    let cleanImage = '';
+    if (Array.isArray(item.product?.images) && item.product.images.length > 0) {
+      const rawImg = String(item.product.images[0] || '');
+      // Chỉ lưu URL thực tế (http, https hoặc đường dẫn tĩnh /). Không bao giờ lưu Base64 hàng trăm KB
+      if (rawImg.startsWith('http://') || rawImg.startsWith('https://') || rawImg.startsWith('/') || (rawImg.length < 500 && !rawImg.startsWith('data:'))) {
+        cleanImage = rawImg;
+      }
+    }
 
     return {
       productId: String(item.product?.id || ''),
       name: String(item.product?.name || 'Sản phẩm HV CLOTHING'),
       slug: String(item.product?.slug || item.product?.id || ''),
-      image,
+      image: cleanImage,
       size: String(item.selectedSize || 'Freesize'),
       color: colorName,
       quantity,
@@ -196,8 +211,14 @@ export const syncLocalOrdersToFirestore = async (): Promise<{ syncedCount: numbe
 
   for (const order of unsynced) {
     try {
+      const cleanedItems = (order.items || []).map((it) => ({
+        ...it,
+        image: typeof it.image === 'string' && (it.image.startsWith('data:image') || it.image.length > 500) ? '' : (it.image || ''),
+      }));
+
       const payload = {
         ...order,
+        items: cleanedItems,
         createdAt: serverTimestamp(),
       };
       delete (payload as any).syncedToCloud;
@@ -210,6 +231,7 @@ export const syncLocalOrdersToFirestore = async (): Promise<{ syncedCount: numbe
         await setDoc(doc(firebaseDb, 'orders', order.id), payload, { merge: true });
       }
 
+      order.items = cleanedItems;
       order.syncedToCloud = true;
       delete order.cloudError;
       syncedCount++;

@@ -11,9 +11,9 @@ export interface UploadedProductImages {
 
 export const compressImageToDataUrl = async (
   file: File,
-  maxWidth = 1200,
-  maxHeight = 1600,
-  quality = 0.82,
+  maxWidth = 720,
+  maxHeight = 960,
+  quality = 0.72,
 ): Promise<string> => {
   return new Promise((resolve) => {
     const reader = new FileReader();
