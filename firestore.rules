@@ -1,0 +1,67 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function validProduct(data, productId) {
+      return data.keys().hasAll([
+          'id', 'slug', 'name', 'category', 'categoryLabel', 'subcategory', 'gender',
+          'price', 'description', 'details', 'material', 'care', 'sizes', 'colors',
+          'rating', 'reviews', 'inStock', 'images'
+        ])
+        && data.keys().hasOnly([
+          'id', 'slug', 'name', 'category', 'categoryLabel', 'subcategory', 'gender',
+          'price', 'salePrice', 'description', 'details', 'material', 'care', 'sizes',
+          'colors', 'rating', 'reviews', 'badge', 'inStock', 'images', 'isNew',
+          'isFeatured', 'isBestSeller'
+        ])
+        && data.id == productId
+        && data.slug is string
+        && data.name is string
+        && data.category in ['women', 'men', 'accessories', 'collections']
+        && data.gender in ['women', 'men', 'unisex']
+        && data.price is number
+        && data.price >= 0
+        && data.description is string
+        && data.details is list
+        && data.material is string
+        && data.care is list
+        && data.sizes is list
+        && data.colors is list
+        && data.images is list
+        && data.images.size() > 0
+        && data.images.size() <= 12
+        && data.rating is number
+        && data.rating >= 0
+        && data.rating <= 5
+        && data.reviews is int
+        && data.reviews >= 0
+        && data.inStock is bool
+        && (!('salePrice' in data)
+          || (data.salePrice is number && data.salePrice >= 0 && data.salePrice <= data.price));
+    }
+
+    match /products/{productId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && validProduct(request.resource.data, productId);
+      allow delete: if isAdmin();
+    }
+
+    match /admins/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
