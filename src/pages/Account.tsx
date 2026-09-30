@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, LoaderCircle } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, LoaderCircle, LogOut, Shield } from 'lucide-react';
 import { useAuth } from '../context/useAuth';
 import { firebaseConfigured } from '../lib/firebase';
 
 export const Account: React.FC = () => {
-  const { user, loading, login, register } = useAuth();
+  const { user, loading, login, register, logout } = useAuth();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [isRegister, setIsRegister] = useState(searchParams.get('mode') === 'register');
@@ -15,9 +15,6 @@ export const Account: React.FC = () => {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const nextPath = searchParams.get('next');
-  const destination = nextPath?.startsWith('/') && !nextPath.startsWith('//')
-    ? nextPath
-    : user?.role === 'admin' ? '/admin' : '/';
 
   if (loading) {
     return (
@@ -29,7 +26,75 @@ export const Account: React.FC = () => {
       </div>
     );
   }
-  if (user) return <Navigate to={destination} replace />;
+
+  if (user) {
+    return (
+      <main className="min-h-[78vh] bg-[#F7F7F5] px-5 py-12 sm:py-20">
+        <div className="mx-auto max-w-2xl border border-[#E2E0DB] bg-white p-8 sm:p-12 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#ECEBE6] pb-6">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.24em] text-[#777]">HV CLOTHING MEMBER</p>
+              <h1 className="mt-1 font-serif text-3xl text-[#171A18]">
+                {user.name ? `Xin chào, ${user.name}` : 'Tài khoản của bạn'}
+              </h1>
+            </div>
+            <span
+              className={`px-3 py-1 text-xs font-medium uppercase tracking-wider ${
+                user.role === 'admin' ? 'bg-[#263C36] text-white' : 'bg-[#EAEAEA] text-[#555]'
+              }`}
+            >
+              {user.role === 'admin' ? 'Quản trị viên' : 'Thành viên'}
+            </span>
+          </div>
+
+          <div className="mt-6 space-y-3 py-2 text-xs text-[#333]">
+            <div className="flex justify-between border-b border-[#F0F0EE] py-3">
+              <span className="text-[#777]">Địa chỉ Email:</span>
+              <span className="font-medium text-[#111]">{user.email}</span>
+            </div>
+            {user.name && (
+              <div className="flex justify-between border-b border-[#F0F0EE] py-3">
+                <span className="text-[#777]">Họ và tên:</span>
+                <span className="font-medium text-[#111]">{user.name}</span>
+              </div>
+            )}
+            <div className="flex justify-between border-b border-[#F0F0EE] py-3">
+              <span className="text-[#777]">Mã định danh (UID):</span>
+              <span className="font-mono text-[11px] text-[#666]">{user.id}</span>
+            </div>
+          </div>
+
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            {user.role === 'admin' && (
+              <Link
+                to="/admin"
+                className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 bg-[#263C36] px-5 text-xs font-medium tracking-[0.14em] text-white transition-colors hover:bg-[#192A25]"
+              >
+                <Shield size={15} />
+                QUẢN TRỊ ADMIN
+              </Link>
+            )}
+            <Link
+              to="/shop"
+              className="inline-flex min-h-11 flex-1 items-center justify-center border border-[#D5D5CF] bg-white px-5 text-xs font-medium tracking-[0.14em] text-[#333] transition-colors hover:bg-[#F7F7F5]"
+            >
+              MUA SẮM NGAY
+            </Link>
+            <button
+              type="button"
+              onClick={() => {
+                void logout();
+              }}
+              className="inline-flex min-h-11 items-center justify-center gap-2 border border-rose-200 bg-rose-50 px-5 text-xs font-medium tracking-[0.14em] text-[#A43131] transition-colors hover:bg-rose-100"
+            >
+              <LogOut size={15} />
+              ĐĂNG XUẤT
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

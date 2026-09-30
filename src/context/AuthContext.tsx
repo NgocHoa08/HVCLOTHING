@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword,
   signOut, updateProfile, type User as FirebaseUser } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { AuthContext, type AuthUser } from './auth-context';
 import { firebaseAuth, firebaseDb } from '../lib/firebase';
 
@@ -63,6 +63,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!firebaseAuth) throw new Error('Chưa cấu hình Firebase. Hãy điền thông tin VITE_FIREBASE_* trong file .env.');
     const credential = await signInWithEmailAndPassword(firebaseAuth, email.trim(), password);
     const signedInUser = await toAuthUser(credential.user);
+    if (firebaseDb) {
+      await setDoc(
+        doc(firebaseDb, 'users', credential.user.uid),
+        {
+          uid: credential.user.uid,
+          email: credential.user.email || email.trim(),
+          name: credential.user.displayName || undefined,
+          lastLoginAt: serverTimestamp(),
+        },
+        { merge: true },
+      ).catch(() => undefined);
+    }
     setUser(signedInUser);
     return signedInUser;
   };
@@ -71,9 +83,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!firebaseAuth) throw new Error('Chưa cấu hình Firebase. Hãy điền thông tin VITE_FIREBASE_* trong file .env.');
     const credential = await createUserWithEmailAndPassword(firebaseAuth, email.trim(), password);
     await updateProfile(credential.user, { displayName: name.trim() });
-    const registeredUser = await toAuthUser(credential.user);
-    setUser(registeredUser);
-    return registeredUser;
+    const signedInUser = await toAuthUser(credential.user);
+    if (firebaseDb) {
+      await setDoc(
+        doc(firebaseDb, 'users', credential.user.uid),
+        {
+          uid: credential.user.uid,
+          name: name.trim(),
+          email: email.trim(),
+          role: signedInUser.role,
+          createdAt: serverTimestamp(),
+          lastLoginAt: serverTimestamp(),
+        },
+        { merge: true },
+      ).catch(() => undefined);
+    }
+    setUser(signedInUser);
+    return signedInUser;
   };
 
   const logout = async () => {

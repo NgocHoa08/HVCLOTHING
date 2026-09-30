@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
-import { Search, User, Heart, ShoppingBag, Menu, ChevronDown } from 'lucide-react';
+import { Search, User, Heart, ShoppingBag, Menu, ChevronDown, LogOut, Shield } from 'lucide-react';
+import { useAuth } from '../context/useAuth';
 import { useCart } from '../context/CartContext';
 import { MobileMenu } from './MobileMenu';
 import { MegaMenu } from './MegaMenu';
@@ -10,7 +11,8 @@ export const Header: React.FC = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isShopMegaOpen, setIsShopMegaOpen] = useState(false);
-  const { cartCount, wishlist, setIsSearchOpen, setIsCartDrawerOpen } = useCart();
+  const { user, logout } = useAuth();
+  const { cartCount, wishlist, setIsSearchOpen, setIsCartDrawerOpen, addToast } = useCart();
   const location = useLocation();
 
   useEffect(() => {
@@ -145,15 +147,74 @@ export const Header: React.FC = () => {
                 <Search className="w-[18px] h-[18px] stroke-[1.4]" />
               </button>
 
-              {/* Account */}
-              <Link
-                to="/account"
-                className="text-[#111111] hover:opacity-60 transition-opacity p-1"
-                aria-label="Tài khoản khách hàng"
-                title="Tài khoản"
-              >
-                <User className="w-[18px] h-[18px] stroke-[1.4]" />
-              </Link>
+              {/* Account Dropdown / Link */}
+              {user ? (
+                <div className="relative group">
+                  <button
+                    type="button"
+                    className="flex items-center gap-1.5 text-[#111111] hover:opacity-80 transition-opacity p-1"
+                    aria-label="Menu tài khoản"
+                  >
+                    <User className="w-[18px] h-[18px] stroke-[1.4]" />
+                    <span className="hidden xl:inline max-w-[110px] truncate text-[11px] font-medium tracking-wide">
+                      {user.name || user.email.split('@')[0]}
+                    </span>
+                    <ChevronDown className="w-3 h-3 text-[#777] -ml-0.5" />
+                  </button>
+
+                  {/* Dropdown Menu */}
+                  <div className="absolute right-0 top-full mt-1.5 w-60 bg-white border border-[#E2E0DB] shadow-lg py-1.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 z-50">
+                    <div className="px-4 py-2 border-b border-[#F0F0EE]">
+                      <p className="text-[10px] text-[#777] uppercase tracking-wider">Tài khoản</p>
+                      <p className="text-xs font-semibold text-[#111] truncate">{user.name || user.email}</p>
+                      <span className={`inline-block mt-1 px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider ${
+                        user.role === 'admin' ? 'bg-[#263C36] text-white' : 'bg-[#EAEAEA] text-[#555]'
+                      }`}>
+                        {user.role === 'admin' ? 'Quản trị viên' : 'Khách hàng'}
+                      </span>
+                    </div>
+
+                    {user.role === 'admin' && (
+                      <Link
+                        to="/admin"
+                        className="flex items-center gap-2 px-4 py-2.5 text-xs text-[#263C36] font-medium hover:bg-[#F7F7F5] transition-colors"
+                      >
+                        <Shield className="w-3.5 h-3.5" />
+                        <span>Trang quản trị (Admin)</span>
+                      </Link>
+                    )}
+
+                    <Link
+                      to="/account"
+                      className="flex items-center gap-2 px-4 py-2 text-xs text-[#333] hover:bg-[#F7F7F5] transition-colors"
+                    >
+                      <User className="w-3.5 h-3.5 text-[#777]" />
+                      <span>Thông tin tài khoản</span>
+                    </Link>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void logout();
+                        addToast('Đã đăng xuất tài khoản thành công', 'info');
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-[#A43131] hover:bg-rose-50 transition-colors border-t border-[#F0F0EE] mt-1"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Đăng xuất</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <Link
+                  to="/account"
+                  className="text-[#111111] hover:opacity-60 transition-opacity p-1"
+                  aria-label="Tài khoản khách hàng"
+                  title="Đăng nhập / Đăng ký"
+                >
+                  <User className="w-[18px] h-[18px] stroke-[1.4]" />
+                </Link>
+              )}
 
               {/* Wishlist */}
               <Link
