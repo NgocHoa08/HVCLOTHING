@@ -1,21 +1,30 @@
 import React, { useState } from 'react';
 import { useCart } from '../context/CartContext';
 import { ArrowRight, Check } from 'lucide-react';
+import { saveNewsletterSubscription } from '../lib/customer-submissions';
 
 export const Newsletter: React.FC = () => {
   const [email, setEmail] = useState('');
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
   const { addToast } = useCart();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !email.includes('@')) {
-      addToast('Vui lòng nhập địa chỉ email hợp lệ', 'error');
-      return;
+    setIsSubmitting(true);
+    setError('');
+    try {
+      await saveNewsletterSubscription(email);
+      setIsSubscribed(true);
+      addToast('Đã lưu email đăng ký trải nghiệm HV CLOTHING', 'success');
+    } catch (submitError) {
+      const message = submitError instanceof Error ? submitError.message : 'Không thể lưu email đăng ký.';
+      setError(message);
+      addToast(message, 'error');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setIsSubscribed(true);
-    addToast('Chào mừng bạn đến với bản tin đặc quyền của HV CLOTHING', 'success');
   };
 
   return (
@@ -39,7 +48,7 @@ export const Newsletter: React.FC = () => {
             <div className="p-4 bg-neutral-900 border border-neutral-700 text-white flex items-center justify-center gap-2.5">
               <Check className="w-4 h-4 text-emerald-400" />
               <span className="text-xs tracking-wider uppercase font-medium">
-                Cảm ơn bạn. Thư xác nhận thành viên đã được gửi vào hộp thư!
+                Cảm ơn bạn. Email đã được ghi nhận để nhận cập nhật từ HV CLOTHING.
               </span>
             </div>
           ) : (
@@ -53,17 +62,22 @@ export const Newsletter: React.FC = () => {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="ĐỊA CHỈ EMAIL CỦA BẠN"
                 required
+                disabled={isSubmitting}
+                aria-label="Địa chỉ email đăng ký nhận bản tin"
                 className="flex-1 px-4 py-3.5 bg-neutral-900 border border-neutral-700 sm:border-r-0 text-white text-xs font-light tracking-wider placeholder:text-neutral-500 focus:outline-none focus:border-white transition-colors uppercase rounded-none"
               />
               <button
                 type="submit"
+                disabled={isSubmitting}
                 className="px-8 py-3.5 bg-white text-[#111111] hover:bg-neutral-200 text-xs tracking-[0.18em] uppercase font-medium transition-colors flex items-center justify-center gap-2 shrink-0 rounded-none"
               >
-                <span>ĐĂNG KÝ</span>
+                <span>{isSubmitting ? 'ĐANG LƯU...' : 'ĐĂNG KÝ'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </form>
           )}
+
+          {error && !isSubscribed && <p role="alert" className="mt-3 text-xs text-rose-300">{error}</p>}
 
           <p className="text-[10px] text-neutral-500 font-light mt-4 tracking-wider">
             Bạn có thể hủy đăng ký bất cứ lúc nào. Đọc Chính sách Quyền riêng tư của chúng tôi.

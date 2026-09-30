@@ -61,7 +61,12 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [cart, setCart] = useState<CartItem[]>(() => {
     try {
       const saved = localStorage.getItem(CART_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(
+        (item) => item && item.product && typeof item.product === 'object' && typeof item.product.price === 'number',
+      );
     } catch {
       return [];
     }
@@ -263,11 +268,12 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const closeQuickView = () => setQuickViewProduct(null);
 
   // Cart calculations
-  const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
+  const cartCount = cart.reduce((acc, item) => acc + (item?.quantity || 0), 0);
 
   const subtotal = cart.reduce((acc, item) => {
-    const unitPrice = item.product.salePrice ?? item.product.price;
-    return acc + unitPrice * item.quantity;
+    if (!item?.product) return acc;
+    const unitPrice = item.product.salePrice ?? item.product.price ?? 0;
+    return acc + unitPrice * (item.quantity || 1);
   }, 0);
 
   const discount = Math.round(subtotal * discountPercent);

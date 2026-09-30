@@ -4,6 +4,7 @@ import { useCart } from '../context/CartContext';
 import { formatPrice } from '../data/products';
 import { CheckCircle2, ShieldCheck, CreditCard, Banknote, QrCode, ArrowLeft, Truck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { saveOrder } from '../lib/customer-submissions';
 
 export const Checkout: React.FC = () => {
   const { cart, subtotal, discount, couponCode, shippingFee, total, clearCart } = useCart();
@@ -18,6 +19,8 @@ export const Checkout: React.FC = () => {
   const [district, setDistrict] = useState('Quận Hoàn Kiếm');
   const [ward, setWard] = useState('Phường Tràng Tiền');
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'bank' | 'card'>('cod');
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [orderError, setOrderError] = useState('');
 
   // Confirmation modal
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
@@ -44,11 +47,34 @@ export const Checkout: React.FC = () => {
     );
   }
 
-  const handlePlaceOrder = (e: React.FormEvent) => {
+  const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    const generated = `NV-${Math.floor(100000 + Math.random() * 900000)}`;
-    setOrderCode(generated);
-    setIsSuccessModalOpen(true);
+    setIsSubmittingOrder(true);
+    setOrderError('');
+    try {
+      const savedOrder = await saveOrder({
+        email,
+        fullName,
+        phone,
+        address,
+        city,
+        district,
+        ward,
+        paymentMethod,
+        items: cart,
+        subtotal,
+        discount,
+        couponCode,
+        shippingFee,
+        total,
+      });
+      setOrderCode(savedOrder.orderCode);
+      setIsSuccessModalOpen(true);
+    } catch (submitError) {
+      setOrderError(submitError instanceof Error ? submitError.message : 'Không thể lưu đơn hàng. Vui lòng thử lại.');
+    } finally {
+      setIsSubmittingOrder(false);
+    }
   };
 
   const handleFinish = () => {
@@ -365,12 +391,14 @@ export const Checkout: React.FC = () => {
 
               {/* PLACE ORDER Button */}
               <div className="mt-8">
+                {orderError && <p role="alert" className="mb-3 text-xs text-[#A43131]">{orderError}</p>}
                 <button
                   type="submit"
-                  className="w-full btn-luxury flex items-center justify-center gap-2"
+                  disabled={isSubmittingOrder}
+                  className="w-full btn-luxury flex items-center justify-center gap-2 disabled:cursor-wait disabled:opacity-60"
                 >
                   <ShieldCheck className="w-4 h-4" />
-                  <span>ĐẶT HÀNG NGAY</span>
+                  <span>{isSubmittingOrder ? 'ĐANG LƯU ĐƠN...' : 'ĐẶT HÀNG NGAY'}</span>
                 </button>
               </div>
 

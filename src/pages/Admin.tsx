@@ -1,9 +1,50 @@
-import React, { useState } from 'react';
-import { Database, LogOut, PackagePlus, Pencil, Search, Trash2, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { collection, doc, onSnapshot, orderBy, query, updateDoc, type Timestamp } from 'firebase/firestore';
+import { Database, ImagePlus, LogOut, Mail, PackagePlus, Pencil, Search, ShoppingBag, Trash2, X } from 'lucide-react';
 import { useAuth } from '../context/useAuth';
 import { useProducts } from '../context/useProducts';
 import { formatPrice, PRODUCTS } from '../data/products';
+import { firebaseDb } from '../lib/firebase';
+import { deleteUploadedProductImages, uploadProductImages } from '../lib/product-images';
 import type { Product, ProductCategory } from '../types/product';
+
+type AdminTab = 'products' | 'orders' | 'subscribers';
+
+interface AdminOrder {
+  id: string;
+  orderCode: string;
+  customer: { email: string; fullName: string; phone: string };
+  shipping: { address: string; city: string; district: string; ward: string };
+  items: Array<{ productId: string; name: string; size: string; color: string; quantity: number; unitPrice: number; lineTotal: number }>;
+  subtotal: number;
+  discount: number;
+  couponCode: string;
+  shippingFee: number;
+  total: number;
+  paymentMethod: 'cod' | 'bank' | 'card';
+  status: 'new' | 'confirmed' | 'packing' | 'shipped' | 'completed' | 'cancelled';
+  createdAt?: Timestamp;
+}
+
+interface NewsletterSubscriber {
+  id: string;
+  email: string;
+  status: 'subscribed' | 'unsubscribed';
+  createdAt?: Timestamp;
+}
+
+const orderStatusLabels: Record<AdminOrder['status'], string> = {
+  new: 'Mới đặt', confirmed: 'Đã xác nhận', packing: 'Đang chuẩn bị',
+  shipped: 'Đang giao', completed: 'Hoàn tất', cancelled: 'Đã hủy',
+};
+
+const paymentMethodLabels: Record<AdminOrder['paymentMethod'], string> = {
+  cod: 'COD', bank: 'Chuyển khoản', card: 'Thẻ quốc tế',
+};
+
+const formatDate = (timestamp?: Timestamp) => timestamp
+  ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(timestamp.toDate())
+  : 'Đang cập nhật';
 
 interface ProductForm {
   name: string;
@@ -15,7 +56,8 @@ interface ProductForm {
   description: string;
   material: string;
   sizes: string;
-  images: string;
+  images: File[];
+  existingImages: string[];
   inStock: boolean;
   isNew: boolean;
   isFeatured: boolean;
@@ -24,7 +66,7 @@ interface ProductForm {
 
 const emptyForm: ProductForm = {
   name: '', slug: '', category: 'women', subcategory: '', price: '', salePrice: '',
-  description: '', material: '', sizes: 'S, M, L', images: '',
+  description: '', material: '', sizes: 'S, M, L', images: [], existingImages: [],
   inStock: true, isNew: false, isFeatured: false, isBestSeller: false,
 };
 
@@ -42,7 +84,8 @@ const formFromProduct = (product: Product): ProductForm => ({
   description: product.description,
   material: product.material,
   sizes: product.sizes.join(', '),
-  images: product.images.join('\n'),
+  images: [],
+  existingImages: product.images,
   inStock: product.inStock,
   isNew: Boolean(product.isNew),
   isFeatured: Boolean(product.isFeatured),
@@ -53,9 +96,58 @@ const slugify = (value: string) => value.trim().toLowerCase()
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
+const FileThumbnail: React.FC<{ file: File; onRemove: () => void }> = ({ file, onRemove }) => {
+  const [preview, setPreview] = useState<string>('');
+
+  useEffect(() => {
+    let isMounted = true;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      if (isMounted && typeof e.target?.result === 'string') {
+        setPreview(e.target.result);
+      }
+    };
+    reader.readAsDataURL(file);
+    return () => {
+      isMounted = false;
+    };
+  }, [file]);
+
+  return (
+    <div className="group relative h-16 w-16 flex-shrink-0 overflow-hidden rounded border border-[#DADAD4] bg-[#F7F7F5]">
+      {preview ? (
+        <img src={preview} alt={file.name} className="h-full w-full object-cover" />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-[10px] text-[#888]">
+          <div className="h-4 w-4 animate-spin rounded-full border border-[#263C36] border-t-transparent" />
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Xóa ảnh ${file.name}`}
+        title="Xóa ảnh này"
+        className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/75 text-white opacity-90 transition-opacity hover:bg-black group-hover:opacity-100"
+      >
+        <X size={12} aria-hidden="true" />
+      </button>
+      <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-0.5 text-center text-[8px] text-white">
+        {(file.size / 1024).toFixed(0)} KB
+      </span>
+    </div>
+  );
+};
+
 export const Admin: React.FC = () => {
   const { user, logout } = useAuth();
   const { products, loading, error: catalogError, firebaseConfigured, saveProduct, deleteProduct, seedDefaultCatalog } = useProducts();
+  const [activeTab, setActiveTab] = useState<AdminTab>('products');
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [subscribers, setSubscribers] = useState<NewsletterSubscriber[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(Boolean(firebaseDb));
+  const [subscribersLoading, setSubscribersLoading] = useState(Boolean(firebaseDb));
+  const [managementError, setManagementError] = useState('');
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -63,6 +155,40 @@ export const Admin: React.FC = () => {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    if (!firebaseDb) return;
+
+    const unsubscribeOrders = onSnapshot(
+      query(collection(firebaseDb, 'orders'), orderBy('createdAt', 'desc')),
+      (snapshot) => {
+        setOrders(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as AdminOrder));
+        setOrdersLoading(false);
+      },
+      (snapshotError) => {
+        setManagementError(`Không tải được đơn hàng: ${snapshotError.message}`);
+        setOrdersLoading(false);
+      },
+    );
+    const unsubscribeSubscribers = onSnapshot(
+      query(collection(firebaseDb, 'newsletterSubscribers'), orderBy('createdAt', 'desc')),
+      (snapshot) => {
+        setSubscribers(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as NewsletterSubscriber));
+        setSubscribersLoading(false);
+      },
+      (snapshotError) => {
+        setManagementError(`Không tải được email đăng ký: ${snapshotError.message}`);
+        setSubscribersLoading(false);
+      },
+    );
+
+    return () => {
+      unsubscribeOrders();
+      unsubscribeSubscribers();
+    };
+  }, []);
 
   const filteredProducts = products.filter((product) =>
     `${product.name} ${product.slug} ${product.categoryLabel}`.toLowerCase().includes(search.toLowerCase()));
@@ -80,45 +206,54 @@ export const Admin: React.FC = () => {
     const slug = slugify(form.slug || name);
     const price = Number(form.price);
     const salePrice = form.salePrice ? Number(form.salePrice) : undefined;
-    const images = form.images.split('\n').map((image) => image.trim()).filter(Boolean);
     if (!name || !slug || !Number.isFinite(price) || price < 0 || !form.sizes.split(',').some((size) => size.trim())
-      || (salePrice !== undefined && (!Number.isFinite(salePrice) || salePrice > price)) || !images.length
-      || images.some((image) => !image.startsWith('https://'))) {
-      setError('Kiểm tra tên, đường dẫn, giá, kích cỡ và ảnh HTTPS. Giá ưu đãi không được cao hơn giá gốc.');
+      || (salePrice !== undefined && (!Number.isFinite(salePrice) || salePrice > price))
+      || form.images.length + form.existingImages.length === 0
+      || form.images.length + form.existingImages.length > 12) {
+      setError('Kiểm tra tên, đường dẫn, giá, kích cỡ và ảnh. Cần ít nhất 1 ảnh, tối đa 12 ảnh; giá ưu đãi không cao hơn giá gốc.');
       setSaving(false);
       return;
     }
 
     const gender = form.category === 'men' ? 'men' : form.category === 'women' ? 'women' : 'unisex';
-    const product: Product = {
-      ...(editing ?? {
-        id: `novae-${crypto.randomUUID()}`,
-        details: [], care: [], colors: [{ name: 'Noir', hex: '#111111' }], rating: 5, reviews: 0,
-      }),
-      name,
-      slug,
-      category: form.category,
-      categoryLabel: categoryLabels[form.category],
-      subcategory: form.subcategory.trim() || 'Shirts',
-      gender,
-      price,
-      salePrice,
-      description: form.description.trim(),
-      material: form.material.trim() || 'Đang cập nhật',
-      badge: salePrice !== undefined ? 'SALE' : form.isBestSeller ? 'BEST SELLER' : form.isNew ? 'NEW' : undefined,
-      sizes: form.sizes.split(',').map((size) => size.trim()).filter(Boolean),
-      images,
-      inStock: form.inStock,
-      isNew: form.isNew,
-      isFeatured: form.isFeatured,
-      isBestSeller: form.isBestSeller,
-    };
-
+    const productId = editing?.id ?? `novae-${crypto.randomUUID()}`;
+    let uploadedStoragePaths: string[] = [];
     try {
+      const uploaded = await uploadProductImages(productId, form.images);
+      uploadedStoragePaths = uploaded.storagePaths;
+      const product: Product = {
+        ...(editing ?? {
+          id: productId,
+          details: [], care: [], colors: [{ name: 'Noir', hex: '#111111' }], rating: 5, reviews: 0,
+        }),
+        name,
+        slug,
+        category: form.category,
+        categoryLabel: categoryLabels[form.category],
+        subcategory: form.subcategory.trim() || 'Shirts',
+        gender,
+        price,
+        salePrice,
+        description: form.description.trim(),
+        material: form.material.trim() || 'Đang cập nhật',
+        badge: salePrice !== undefined ? 'SALE' : form.isBestSeller ? 'BEST SELLER' : form.isNew ? 'NEW' : undefined,
+        sizes: form.sizes.split(',').map((size) => size.trim()).filter(Boolean),
+        images: [...form.existingImages, ...uploaded.urls],
+        inStock: form.inStock,
+        isNew: form.isNew,
+        isFeatured: form.isFeatured,
+        isBestSeller: form.isBestSeller,
+      };
       await saveProduct(product, !editing);
       closeEditor();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Không thể lưu sản phẩm.');
+      await deleteUploadedProductImages(uploadedStoragePaths).catch(() => undefined);
+      const rawMessage = saveError instanceof Error ? saveError.message : 'Không thể lưu sản phẩm.';
+      if (rawMessage.toLowerCase().includes('permission-denied') || rawMessage.toLowerCase().includes('insufficient permissions')) {
+        setError('Firestore từ chối quyền ghi: Tài khoản hiện tại chưa được cấp quyền admin trong collection "admins/{uid}".');
+      } else {
+        setError(rawMessage);
+      }
     } finally {
       setSaving(false);
     }
@@ -126,6 +261,64 @@ export const Admin: React.FC = () => {
 
   const startCreate = () => { setEditorOpen(true); setEditing(null); setForm(emptyForm); setError(''); };
   const startEdit = (product: Product) => { setEditorOpen(true); setEditing(product); setForm(formFromProduct(product)); setError(''); };
+
+  const addImageFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const selectedFiles = Array.from(files);
+    const totalCount = form.existingImages.length + form.images.length + selectedFiles.length;
+    if (totalCount > 12) {
+      setError(`Tối đa 12 ảnh cho mỗi sản phẩm (hiện đã có ${form.existingImages.length + form.images.length} ảnh).`);
+      return;
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const invalidType = selectedFiles.some((f) => !allowedTypes.includes(f.type));
+    if (invalidType) {
+      setError('Chỉ chấp nhận định dạng ảnh JPG, PNG, WEBP hoặc GIF.');
+      return;
+    }
+
+    const tooLarge = selectedFiles.some((f) => f.size > 10 * 1024 * 1024);
+    if (tooLarge) {
+      setError('Mỗi ảnh dung lượng tối đa 10 MB.');
+      return;
+    }
+
+    setForm((current) => ({ ...current, images: [...current.images, ...selectedFiles] }));
+    setError('');
+  };
+
+  const removeExistingImage = (indexToRemove: number) => {
+    setForm((current) => ({
+      ...current,
+      existingImages: current.existingImages.filter((_, idx) => idx !== indexToRemove),
+    }));
+  };
+
+  const removeNewImage = (indexToRemove: number) => {
+    setForm((current) => ({
+      ...current,
+      images: current.images.filter((_, idx) => idx !== indexToRemove),
+    }));
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files) {
+      addImageFiles(e.dataTransfer.files);
+    }
+  };
 
   const handleDelete = async (product: Product) => {
     if (!window.confirm(`Xóa sản phẩm “${product.name}”?`)) return;
@@ -150,6 +343,29 @@ export const Admin: React.FC = () => {
     }
   };
 
+  const handleOrderStatusChange = async (orderId: string, status: AdminOrder['status']) => {
+    if (!firebaseDb) return;
+    setManagementError('');
+    try {
+      await updateDoc(doc(firebaseDb, 'orders', orderId), { status });
+    } catch (statusError) {
+      setManagementError(statusError instanceof Error ? statusError.message : 'Không cập nhật được trạng thái đơn hàng.');
+    }
+  };
+
+  const downloadSubscribersCsv = () => {
+    const escapeCsv = (value: string) => `"${value.replaceAll('"', '""')}"`;
+    const csv = ['Email,Trạng thái,Ngày đăng ký', ...subscribers.map((subscriber) =>
+      [subscriber.email, subscriber.status, formatDate(subscriber.createdAt)].map(escapeCsv).join(','),
+    )].join('\r\n');
+    const fileUrl = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }));
+    const downloadLink = document.createElement('a');
+    downloadLink.href = fileUrl;
+    downloadLink.download = 'hv-clothing-newsletter-subscribers.csv';
+    downloadLink.click();
+    URL.revokeObjectURL(fileUrl);
+  };
+
   return (
     <main className="min-h-[80vh] bg-[#F5F5F2] px-4 py-8 sm:px-8 lg:px-12">
       <div className="mx-auto max-w-[1440px]">
@@ -161,14 +377,24 @@ export const Admin: React.FC = () => {
         <header className="mb-8 flex flex-wrap items-end justify-between gap-5 border-b border-[#DADAD4] pb-5">
           <div>
             <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-[#6E7771]">HV CLOTHING / QUẢN TRỊ</p>
-            <h1 className="font-serif text-3xl text-[#202722]">Sản phẩm</h1>
-            <p className="mt-1 text-xs text-[#737873]">{products.length} sản phẩm · {user?.email}</p>
+            <h1 className="font-serif text-3xl text-[#202722]">
+              {activeTab === 'products' ? 'Sản phẩm' : activeTab === 'orders' ? 'Đơn hàng' : 'Email đăng ký'}
+            </h1>
+            <p className="mt-1 text-xs text-[#737873]">{user?.email}</p>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={startCreate}
-              className="inline-flex h-10 items-center gap-2 bg-[#263C36] px-4 text-xs font-medium tracking-wide text-white hover:bg-[#192A25]">
-              <PackagePlus size={16} aria-hidden="true" /> Thêm sản phẩm
-            </button>
+            {activeTab === 'products' && (
+              <button type="button" onClick={startCreate}
+                className="inline-flex h-10 items-center gap-2 bg-[#263C36] px-4 text-xs font-medium tracking-wide text-white hover:bg-[#192A25]">
+                <PackagePlus size={16} aria-hidden="true" /> Thêm sản phẩm
+              </button>
+            )}
+            {activeTab === 'subscribers' && subscribers.length > 0 && (
+              <button type="button" onClick={downloadSubscribersCsv}
+                className="inline-flex h-10 items-center gap-2 border border-[#D4D5CE] px-4 text-xs font-medium text-[#404842] hover:bg-white">
+                Tải CSV
+              </button>
+            )}
             <button type="button" onClick={() => { void logout(); }} aria-label="Đăng xuất"
               className="flex h-10 w-10 items-center justify-center border border-[#D4D5CE] text-[#4A514C] hover:bg-white">
               <LogOut size={16} aria-hidden="true" />
@@ -176,7 +402,25 @@ export const Admin: React.FC = () => {
           </div>
         </header>
 
-        <div className={`grid gap-8 ${editorOpen ? 'xl:grid-cols-[minmax(0,1fr)_420px]' : ''}`}>
+        <nav aria-label="Quản lý dữ liệu" className="mb-6 flex gap-1 border-b border-[#DADAD4]">
+          {([
+            ['products', 'Sản phẩm', PackagePlus],
+            ['orders', `Đơn hàng${orders.length ? ` (${orders.length})` : ''}`, ShoppingBag],
+            ['subscribers', `Email đăng ký${subscribers.length ? ` (${subscribers.length})` : ''}`, Mail],
+          ] as const).map(([tab, label, Icon]) => (
+            <button key={tab} type="button" onClick={() => { setActiveTab(tab); setEditorOpen(false); }}
+              aria-current={activeTab === tab ? 'page' : undefined}
+              className={`inline-flex min-h-11 items-center gap-2 border-b-2 px-4 text-xs ${activeTab === tab ? 'border-[#263C36] font-medium text-[#263C36]' : 'border-transparent text-[#707771] hover:text-[#263C36]'}`}>
+              <Icon size={15} aria-hidden="true" /> {label}
+            </button>
+          ))}
+        </nav>
+
+        {managementError && (
+          <p role="alert" className="mb-4 border border-[#E8C9C5] bg-[#FFF7F5] px-3 py-2 text-xs text-[#963E35]">{managementError}</p>
+        )}
+
+        {activeTab === 'products' && <div className={`grid gap-8 ${editorOpen ? 'xl:grid-cols-[minmax(0,1fr)_420px]' : ''}`}>
           <section className="min-w-0">
             <div className="mb-3 flex items-center justify-between gap-4">
               <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-[#404842]">Danh mục sản phẩm</h2>
@@ -273,8 +517,92 @@ export const Admin: React.FC = () => {
                   <input id="product-material" value={form.material} onChange={(event) => updateField('material', event.target.value)} className="admin-input" /></div>
                 <div><label htmlFor="product-sizes" className="mb-1 block text-[11px] text-[#555]">Kích cỡ, cách nhau bằng dấu phẩy</label>
                   <input id="product-sizes" required value={form.sizes} onChange={(event) => updateField('sizes', event.target.value)} className="admin-input" /></div>
-                <div><label htmlFor="product-images" className="mb-1 block text-[11px] text-[#555]">Ảnh HTTPS, mỗi đường dẫn một dòng</label>
-                  <textarea id="product-images" required rows={2} value={form.images} onChange={(event) => updateField('images', event.target.value)} className="admin-input resize-y" /></div>
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <label className="text-[11px] font-medium text-[#555]">
+                      Hình ảnh sản phẩm (tải từ máy)
+                    </label>
+                    <span className="text-[10px] text-[#777]">
+                      {form.existingImages.length + form.images.length}/12 ảnh
+                    </span>
+                  </div>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    id="product-images-input"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    multiple
+                    onChange={(event) => {
+                      addImageFiles(event.target.files);
+                      event.target.value = '';
+                    }}
+                    className="hidden"
+                  />
+
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        fileInputRef.current?.click();
+                      }
+                    }}
+                    className={`flex cursor-pointer flex-col items-center justify-center rounded border-2 border-dashed p-4 text-center transition-colors ${
+                      isDragging
+                        ? 'border-[#263C36] bg-[#263C36]/5'
+                        : 'border-[#DADAD4] bg-[#FAFAF8] hover:border-[#263C36] hover:bg-[#F4F4F0]'
+                    }`}
+                  >
+                    <ImagePlus size={24} className="mb-2 text-[#5E6660]" aria-hidden="true" />
+                    <p className="text-xs font-medium text-[#2E3630]">
+                      Nhấn để chọn ảnh từ máy hoặc kéo thả vào đây
+                    </p>
+                    <p className="mt-1 text-[10px] text-[#7E8580]">
+                      Hỗ trợ PNG, JPG, WEBP, GIF (tối đa 10 MB / ảnh, 1 - 12 ảnh)
+                    </p>
+                  </div>
+
+                  {(form.existingImages.length > 0 || form.images.length > 0) && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {form.existingImages.map((url, idx) => (
+                        <div
+                          key={`existing-${idx}`}
+                          className="group relative h-16 w-16 flex-shrink-0 overflow-hidden rounded border border-[#DADAD4] bg-[#F7F7F5]"
+                        >
+                          <img src={url} alt={`Ảnh ${idx + 1}`} className="h-full w-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeExistingImage(idx);
+                            }}
+                            aria-label={`Xóa ảnh ${idx + 1}`}
+                            title="Xóa ảnh này"
+                            className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/75 text-white opacity-90 transition-opacity hover:bg-black group-hover:opacity-100"
+                          >
+                            <X size={12} aria-hidden="true" />
+                          </button>
+                          <span className="absolute inset-x-0 bottom-0 truncate bg-[#263C36]/85 px-0.5 text-center text-[8px] text-white">
+                            Đã lưu
+                          </span>
+                        </div>
+                      ))}
+                      {form.images.map((file, idx) => (
+                        <FileThumbnail
+                          key={`new-${file.name}-${idx}`}
+                          file={file}
+                          onRemove={() => removeNewImage(idx)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <fieldset className="grid grid-cols-2 gap-2 py-1 text-xs text-[#4E554F]">
                   {([
                     ['inStock', 'Còn hàng'], ['isNew', 'Hàng mới'], ['isFeatured', 'Nổi bật'], ['isBestSeller', 'Bán chạy'],
@@ -289,7 +617,69 @@ export const Admin: React.FC = () => {
               </form>
             </aside>
           )}
-        </div>
+        </div>}
+
+        {activeTab === 'orders' && (
+          <section className="overflow-x-auto border border-[#DADAD4] bg-white">
+            <table className="w-full min-w-[900px] border-collapse text-left">
+              <thead className="bg-[#ECEDE8] text-[10px] uppercase tracking-[0.12em] text-[#606861]">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Mã / Ngày đặt</th>
+                  <th className="px-4 py-3 font-medium">Khách hàng</th>
+                  <th className="px-4 py-3 font-medium">Sản phẩm</th>
+                  <th className="px-4 py-3 font-medium">Thanh toán</th>
+                  <th className="px-4 py-3 font-medium">Tổng tiền</th>
+                  <th className="px-4 py-3 font-medium">Trạng thái</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#ECEDE8]">
+                {orders.map((order) => (
+                  <React.Fragment key={order.id}>
+                    <tr className="text-xs text-[#343A35]">
+                      <td className="px-4 py-3"><p className="font-mono font-medium">{order.orderCode}</p><p className="mt-1 text-[10px] text-[#838983]">{formatDate(order.createdAt)}</p></td>
+                      <td className="px-4 py-3"><p className="font-medium">{order.customer?.fullName}</p><p className="mt-1">{order.customer?.email}</p><p className="mt-1 text-[#777]">{order.customer?.phone}</p></td>
+                      <td className="px-4 py-3">{order.items?.length ?? 0} mặt hàng
+                        <button type="button" onClick={() => setExpandedOrderId((current) => current === order.id ? null : order.id)} className="ml-2 text-[#37634B] underline underline-offset-2">
+                          {expandedOrderId === order.id ? 'Ẩn chi tiết' : 'Chi tiết'}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3">{paymentMethodLabels[order.paymentMethod] ?? order.paymentMethod}</td>
+                      <td className="px-4 py-3 font-medium">{formatPrice(order.total ?? 0)}</td>
+                      <td className="px-4 py-3">
+                        <select aria-label={`Trạng thái đơn ${order.orderCode}`} value={order.status}
+                          onChange={(event) => void handleOrderStatusChange(order.id, event.target.value as AdminOrder['status'])}
+                          className="min-h-9 border border-[#DADAD4] bg-white px-2 text-xs">
+                          {Object.entries(orderStatusLabels).map(([status, statusLabel]) => <option key={status} value={status}>{statusLabel}</option>)}
+                        </select>
+                      </td>
+                    </tr>
+                    {expandedOrderId === order.id && (
+                      <tr className="bg-[#FAFAF7] text-xs text-[#4E554F]"><td colSpan={6} className="px-4 py-4">
+                        <div className="grid gap-4 md:grid-cols-[1fr_1fr]">
+                          <div><h3 className="mb-2 font-semibold">Địa chỉ nhận hàng</h3><p>{order.shipping?.address}, {order.shipping?.ward}, {order.shipping?.district}, {order.shipping?.city}</p><p className="mt-1">Email: {order.customer?.email} · Điện thoại: {order.customer?.phone}</p></div>
+                          <div><h3 className="mb-2 font-semibold">Chi tiết mặt hàng</h3><ul className="space-y-1">{order.items?.map((item, index) => <li key={`${item.productId}-${index}`}>{item.name} · {item.size}/{item.color} · SL {item.quantity} · {formatPrice(item.lineTotal)}</li>)}</ul><p className="mt-2">Tạm tính {formatPrice(order.subtotal)} · Giảm {formatPrice(order.discount)} · Ship {formatPrice(order.shippingFee)}</p></div>
+                        </div>
+                      </td></tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+            {ordersLoading && <p className="px-4 py-4 text-xs text-[#777]">Đang tải đơn hàng...</p>}
+            {!ordersLoading && orders.length === 0 && <p className="px-4 py-12 text-center text-xs text-[#777]">Chưa có đơn hàng nào.</p>}
+          </section>
+        )}
+
+        {activeTab === 'subscribers' && (
+          <section className="overflow-x-auto border border-[#DADAD4] bg-white">
+            <table className="w-full min-w-[600px] border-collapse text-left">
+              <thead className="bg-[#ECEDE8] text-[10px] uppercase tracking-[0.12em] text-[#606861]"><tr><th className="px-4 py-3 font-medium">Email</th><th className="px-4 py-3 font-medium">Nguồn đăng ký</th><th className="px-4 py-3 font-medium">Ngày đăng ký</th><th className="px-4 py-3 font-medium">Trạng thái</th></tr></thead>
+              <tbody className="divide-y divide-[#ECEDE8]">{subscribers.map((subscriber) => <tr key={subscriber.id} className="text-xs text-[#343A35]"><td className="px-4 py-3 font-medium">{subscriber.email}</td><td className="px-4 py-3">Website newsletter</td><td className="px-4 py-3">{formatDate(subscriber.createdAt)}</td><td className="px-4 py-3"><span className={subscriber.status === 'subscribed' ? 'text-[#37634B]' : 'text-[#9B4841]'}>{subscriber.status === 'subscribed' ? 'Đang đăng ký' : 'Đã hủy'}</span></td></tr>)}</tbody>
+            </table>
+            {subscribersLoading && <p className="px-4 py-4 text-xs text-[#777]">Đang tải email đăng ký...</p>}
+            {!subscribersLoading && subscribers.length === 0 && <p className="px-4 py-12 text-center text-xs text-[#777]">Chưa có email đăng ký nào.</p>}
+          </section>
+        )}
       </div>
       <style>{`.admin-input{width:100%;min-height:38px;border:1px solid #d9dad4;background:#fff;padding:8px 10px;font-size:12px;color:#303832;outline:none}.admin-input:focus{border-color:#263c36}`}</style>
     </main>

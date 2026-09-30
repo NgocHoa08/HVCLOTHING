@@ -28,9 +28,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(Boolean(firebaseAuth));
 
   useEffect(() => {
-    if (!firebaseAuth) return;
+    if (!firebaseAuth) {
+      setLoading(false);
+      return;
+    }
 
-    return onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 3000);
+
+    const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
+      clearTimeout(timer);
       try {
         setUser(firebaseUser ? await toAuthUser(firebaseUser) : null);
       } catch {
@@ -44,6 +52,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoading(false);
       }
     });
+
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string) => {

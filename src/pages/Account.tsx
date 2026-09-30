@@ -19,7 +19,16 @@ export const Account: React.FC = () => {
     ? nextPath
     : user?.role === 'admin' ? '/admin' : '/';
 
-  if (loading) return <div className="min-h-[70vh]" aria-busy="true" />;
+  if (loading) {
+    return (
+      <div className="flex min-h-[70vh] items-center justify-center bg-[#F7F7F5]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#263C36] border-t-transparent" />
+          <p className="text-xs text-[#777]">Đang tải tài khoản...</p>
+        </div>
+      </div>
+    );
+  }
   if (user) return <Navigate to={destination} replace />;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {

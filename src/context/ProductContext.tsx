@@ -13,11 +13,19 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => {
     if (!firebaseDb) return;
     return onSnapshot(collection(firebaseDb, 'products'), (snapshot) => {
-      const items = snapshot.docs.map((productDoc) => ({
-        ...productDoc.data(),
-        id: productDoc.id,
-      }) as Product);
-      items.sort((left, right) => left.name.localeCompare(right.name));
+      const items = snapshot.docs.map((productDoc) => {
+        const data = productDoc.data();
+        return {
+          ...data,
+          id: productDoc.id,
+          name: typeof data.name === 'string' ? data.name : 'Sản phẩm',
+          images: Array.isArray(data.images) && data.images.length > 0 ? data.images : ['https://images.unsplash.com/photo-1596755094514-f87e34085b2c?auto=format&fit=crop&w=1000&q=80'],
+          price: typeof data.price === 'number' ? data.price : 0,
+          sizes: Array.isArray(data.sizes) && data.sizes.length > 0 ? data.sizes : ['M'],
+          colors: Array.isArray(data.colors) && data.colors.length > 0 ? data.colors : [{ name: 'Noir', hex: '#111111' }],
+        } as Product;
+      });
+      items.sort((left, right) => (left.name || '').localeCompare(right.name || ''));
       setProducts(items);
       setError('');
       setLoading(false);
